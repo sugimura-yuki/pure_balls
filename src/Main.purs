@@ -27,7 +27,7 @@ main = Canvas.getCanvasElementById "canvas" >>= case _ of
       height = 300.0
     Canvas.setCanvasWidth canvas width
     Canvas.setCanvasHeight canvas height
-    balls <- replicateM 100 randomBall
+    balls <- replicateM 10 randomBall
     last <- now
     _ <- simulate {
       init : {balls,last},
