@@ -1,22 +1,26 @@
-module Main where
+module Main(main) where
 
 import Prelude
 
-import Control.Monad.State (State, execState, get, modify)
+import Control.Monad.State (State, StateT, execState, execStateT, get, modify)
 import Data.DateTime (diff)
 import Data.DateTime.Instant (Instant, toDateTime)
-import Data.Foldable (for_)
-import Data.List.Lazy (List, replicateM)
+import Data.Foldable (foldl, for_)
+import Data.Int (floor)
+import Data.List.Lazy (drop, length, replicateM, singleton, zip, (..))
+import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Data.Time.Duration (Milliseconds(..))
+import Data.Tuple (Tuple(..))
 import Effect (Effect)
+import Effect.Class (liftEffect)
 import Effect.Class.Console (log)
 import Effect.Now (now)
 import Effect.Random (random)
 import Graphics.Canvas as Canvas
-import Math (abs)
-import Math as Math
+import Math (abs, pi)
 import Simulate (simulate)
+import Vector (Vec, vAdd, vDirection, vDistance, vDot, vScale, vSub)
 
 main :: Effect Unit
 main = Canvas.getCanvasElementById "canvas" >>= case _ of
@@ -27,21 +31,58 @@ main = Canvas.getCanvasElementById "canvas" >>= case _ of
       height = 300.0
     Canvas.setCanvasWidth canvas width
     Canvas.setCanvasHeight canvas height
-    balls <- replicateM 10 randomBall
+    balls <- execStateT (replicateM 3 createBall) Map.empty
     last <- now
     _ <- simulate {
       init : {balls,last},
-      update : update {width,height},
-      render : render canvas,
+      update : _update {width,height},
+      render : _render canvas,
       events: []
     }
     pure unit
 
-type Ball = {x::Number,y::Number,radius :: Number,color :: String,vec :: {x::Number,y::Number}}
+type UUID = String
+
+type Ball = {
+  pos :: Vec,
+  move :: Vec,
+  radius :: Number,
+  color :: String
+}
+
 type Member = {
-  balls :: List Ball,
+  balls :: Map.Map UUID Ball,
   last :: Instant
 }
+
+createBall :: StateT (Map.Map UUID Ball) Effect Unit
+createBall = do
+  uuid <- liftEffect genUUID
+  ball <- liftEffect randomBall
+  _ <- modify $ Map.insert uuid ball
+  pure unit
+
+genUUID :: Effect UUID
+genUUID = do
+  x1 <- replicateM 8 x
+  x2 <- replicateM 4 x
+  x3 <- replicateM 3 x
+  z <- (toHex <<< floor) <$> (_ + 8.0) <$> (_ * 4.0) <$> random
+  x4 <- replicateM 3 x
+  x5 <- replicateM 12 x
+  pure $ foldl (<>) "" (x1 <> singleton "-" <> x2 <> singleton "-4" <> x3 <> singleton "-" <> singleton z <> x4 <> singleton "-" <> x5)
+  where
+    x :: Effect String
+    x = (toHex <<< floor) <$> (_ * 16.0) <$> random
+    toHex :: Int -> String
+    toHex a | a < 10 = show a
+    toHex 10 = "a"
+    toHex 11 = "b"
+    toHex 12 = "c"
+    toHex 13 = "d"
+    toHex 14 = "e"
+    toHex 15 = "f"
+    toHex _ = ""
 
 randomColor :: Effect String
 randomColor = do
@@ -53,36 +94,64 @@ randomColor = do
 
 randomBall :: Effect Ball
 randomBall = do
-  r <- (_ + 10.0) <$> (_ * 30.0) <$> random
+  x <- (_ + 150.0) <$> (_ * 100.0) <$> random
+  y <- (_ + 150.0) <$> (_ * 100.0) <$> random
+  radius <- (_ + 10.0) <$> (_ * 30.0) <$> random
   vx <- (_ / 1000.0) <$> (_ - 200.0) <$> (_ * 400.0) <$> random
   vy <- (_ / 1000.0) <$> (_ - 200.0) <$> (_ * 400.0) <$> random
   color <- randomColor
-  pure {x:150.0,y:150.0,radius:r,vec:{x:vx,y:vy},color}
+  pure {
+    pos:{x,y},
+    radius:30.0,
+    move:{x:vx,y:vy},
+    color
+  }
 
-update :: {width :: Number , height :: Number} -> Instant -> Member -> Member
-update {width,height} now m = m{balls = balls' , last = now} where
+_update :: {width :: Number , height :: Number} -> Instant -> Member -> Member
+_update {width, height} now m = execState hdl m where
   Milliseconds dt = diff (toDateTime now) (toDateTime m.last)
-
-  balls' :: List Ball
-  balls' = map (execState (updateBall dt)) m.balls 
   
-  updateBall :: Number -> State Ball Unit
-  updateBall dt = do
-    -- 移動
-    b <- modify \s -> s{
-      x = s.x + dt * s.vec.x,
-      y = s.y + dt * s.vec.y
-    }
-    -- 反射処理
-    when (b.x <= b.radius) $ void $ modify \s -> s{x = s.radius,vec{x = abs s.vec.x}}
-    when (width <= b.x + b.radius) $ void $ modify \s -> s{x = width - s.radius,vec{x = negate abs s.vec.x}}
-    -- 上下
-    when (b.y <= b.radius) $ void $ modify \s -> s{y = s.radius,vec{y = abs s.vec.y}}
-    when (height <= b.y + b.radius) $ void $ modify \s -> s{y = height - s.radius,vec{y = negate abs s.vec.y}}
+  hdl :: State Member Unit
+  hdl = do
+    _ <- modify \b -> b{last = now}
+    _ <- modify \b -> b{balls = move <$> b.balls}
+    _ <- modify \b -> b{balls = reflect <$> b.balls}
+    _ <- modify \b -> b{balls = execState collision b.balls}
     pure unit
 
-render :: Canvas.CanvasElement -> Member -> Effect Unit
-render canvas m = do
+  -- | 移動
+  move :: Ball -> Ball
+  move b = b{pos = vAdd b.pos (vScale dt b.move)}
+  
+  -- | 反射
+  reflect :: Ball -> Ball
+  reflect b | b.pos.x - b.radius <= 0.0    = b{pos{x = b.radius}         ,move{x = abs b.move.x}}
+            | b.pos.x + b.radius >= width  = b{pos{x = width - b.radius} ,move{x = negate (abs b.move.x)}}
+            | b.pos.y - b.radius <= 0.0    = b{pos{y = b.radius}         ,move{y = abs b.move.y}}
+            | b.pos.y + b.radius >= height = b{pos{y = height - b.radius},move{y = negate (abs b.move.y)}}
+            | otherwise = b
+
+  collision :: State (Map.Map UUID Ball) Unit
+  collision = do
+    balls <- Map.toUnfoldable <$> get
+    for_ (zip (1 .. length balls) balls) \(Tuple n (Tuple k1 v1)) -> 
+      for_ (drop n balls) \(Tuple k2 v2) -> do
+        let
+          dist = vDistance v1.pos v2.pos
+          next = vDistance (vAdd v1.pos v1.move) (vAdd v2.pos v2.move)
+        when (dist < v1.radius + v2.radius && next < dist) do
+          let
+            -- １から２に対する力
+            d = vDirection v1.pos v2.pos
+            p = (vDot v1.move d) - (vDot v2.move d)
+            pd = vScale p d
+          -- 衝突時のベクトル計算
+          _ <- modify $ Map.insert k1 v1{move = v1.move `vSub` pd}
+          _ <- modify $ Map.insert k2 v2{move = v2.move `vAdd` pd}
+          pure unit
+
+_render :: Canvas.CanvasElement -> Member -> Effect Unit
+_render canvas m = do
   ctx <- Canvas.getContext2D canvas
   width <- Canvas.getCanvasWidth canvas
   height <- Canvas.getCanvasHeight canvas
@@ -92,11 +161,11 @@ render canvas m = do
     Canvas.setFillStyle ctx b.color
     Canvas.beginPath ctx
     Canvas.arc ctx {
-      x: b.x,
-      y: b.y,
+      x: b.pos.x,
+      y: b.pos.y,
       radius: b.radius,
       start: 0.0,
-      end: 2.0 * Math.pi
+      end: 2.0 * pi
     }
     Canvas.fill ctx
 
