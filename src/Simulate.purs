@@ -2,17 +2,14 @@ module Simulate where
 
 import Prelude
 
-import Data.DateTime.Instant (Instant)
 import Data.Foldable (for_)
 import Effect (Effect)
 import FRP.Event (Event, EventIO, create, sampleOn, sampleOn_, subscribe)
 import FRP.Event.AnimationFrame (animationFrame)
-import FRP.Event.Time (withTime)
 
 type SimulateArgs s = {
   render :: s -> Effect Unit,
   init :: s,
-  update :: Instant -> s -> s,
   events :: Array (Event (s -> s))
 }
 
@@ -25,10 +22,8 @@ simulate args = do
   for_ args.events
     \event -> subscribe (sampleOn onUpdate event) push
 
-  -- 描画と更新処理
-  c <- subscribe (withTime $ sampleOn_ onUpdate animationFrame) \{time,value} -> do
-    push (args.update time value)
-    args.render value
+  -- 描画処理
+  c <- subscribe (sampleOn_ onUpdate animationFrame) args.render
 
   -- 初期値送信
   push args.init
