@@ -7,10 +7,19 @@ You can edit this file as you like.
   [ "canvas"
   , "console"
   , "effect"
-  , "halogen"
   , "psci-support"
   , "random"
-  , "record"
+  , "datetime"
+  , "foldable-traversable"
+  , "integers"
+  , "lists"
+  , "math"
+  , "maybe"
+  , "now"
+  , "prelude"
+  , "transformers"
+  , "tuples"
+  , "web-html"
   ]
 , packages = ./packages.dhall
 , sources = [ "src/**/*.purs", "test/**/*.purs" ]
