@@ -2,6 +2,7 @@
     "name": "purescript",
     "dockerFile": "Dockerfile",
     "extensions": [
-        "nwolverson.ide-purescript"
+        "nwolverson.ide-purescript",
+        "mvakula.vscode-purty"
     ]
 }

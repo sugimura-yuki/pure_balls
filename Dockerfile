@@ -1,2 +1,2 @@
 FROM node
-RUN yarn global add purescript spago
+RUN yarn global add purescript spago purty

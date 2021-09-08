@@ -4,11 +4,9 @@ You can edit this file as you like.
 -}
 { name = "my-project"
 , dependencies =
-  [ "behaviors"
-  , "canvas"
+  [ "canvas"
   , "console"
   , "effect"
-  , "generics-rep"
   , "halogen"
   , "psci-support"
   , "random"
